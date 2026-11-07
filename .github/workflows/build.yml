@@ -1,4 +1,3 @@
-name: Build APK
 on:
   push:
   workflow_dispatch:
@@ -106,65 +105,61 @@ jobs:
               private val swipeLen = 0.30f   // длина свайпа (доля ширины). Подбирай, чтобы выходило ровно 180°
               private val yPos = 0.50f       // высота свайпа (доля высоты)
               private val swipeMs = 8L       // длительность одного свайпа, мс
+              private val btnMarginX = 60    // отступ кнопки от правого края, px
+              private val btnMarginY = 120   // отступ кнопки от нижнего края, px
               // ======================================
 
               private val handler = Handler(Looper.getMainLooper())
               private lateinit var wm: WindowManager
               private var btn: Button? = null
-              private lateinit var lp: WindowManager.LayoutParams
               private var running = false
               private var toRight = true
+              private var gen = 0
 
               override fun onServiceConnected() {
                   wm = getSystemService(WINDOW_SERVICE) as WindowManager
-                  lp = WindowManager.LayoutParams(
-                      200, 200,
+                  val lp = WindowManager.LayoutParams(
+                      240, 240,
                       WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                       WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                       PixelFormat.TRANSLUCENT
-                  ).apply { gravity = Gravity.TOP or Gravity.START; x = 40; y = 300 }
+                  ).apply {
+                      gravity = Gravity.BOTTOM or Gravity.END
+                      x = btnMarginX
+                      y = btnMarginY
+                  }
 
                   btn = Button(this).apply {
-                      text = "▶"
-                      textSize = 24f
+                      text = "HOLD"
+                      textSize = 18f
                       setTextColor(Color.WHITE)
                       setBackgroundColor(Color.parseColor("#AA2E7D32"))
-                      setOnTouchListener(dragOrTap())
+                      setOnTouchListener { _, e ->
+                          when (e.action) {
+                              MotionEvent.ACTION_DOWN -> startMacro()
+                              MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> stopMacro()
+                          }
+                          true
+                      }
                   }
                   wm.addView(btn, lp)
               }
 
-              private fun dragOrTap(): android.view.View.OnTouchListener {
-                  var downX = 0f; var downY = 0f; var startLx = 0; var startLy = 0; var moved = false
-                  return android.view.View.OnTouchListener { _, e ->
-                      when (e.action) {
-                          MotionEvent.ACTION_DOWN -> {
-                              downX = e.rawX; downY = e.rawY
-                              startLx = lp.x; startLy = lp.y; moved = false
-                          }
-                          MotionEvent.ACTION_MOVE -> {
-                              val dx = e.rawX - downX; val dy = e.rawY - downY
-                              if (Math.abs(dx) > 15 || Math.abs(dy) > 15) moved = true
-                              if (moved) {
-                                  lp.x = startLx + dx.toInt(); lp.y = startLy + dy.toInt()
-                                  wm.updateViewLayout(btn, lp)
-                              }
-                          }
-                          MotionEvent.ACTION_UP -> if (!moved) toggle()
-                      }
-                      true
-                  }
+              private fun startMacro() {
+                  if (running) return
+                  running = true
+                  gen++
+                  btn?.setBackgroundColor(Color.parseColor("#AAC62828"))
+                  swipe(gen)
               }
 
-              private fun toggle() {
-                  running = !running
-                  btn?.text = if (running) "⏸" else "▶"
-                  btn?.setBackgroundColor(Color.parseColor(if (running) "#AAC62828" else "#AA2E7D32"))
-                  if (running) swipe()
+              private fun stopMacro() {
+                  running = false
+                  btn?.setBackgroundColor(Color.parseColor("#AA2E7D32"))
               }
 
-              private fun swipe() {
-                  if (!running) return
+              private fun swipe(id: Int) {
+                  if (!running || id != gen) return
                   val dm = resources.displayMetrics
                   val w = dm.widthPixels.toFloat(); val h = dm.heightPixels.toFloat()
                   val x0 = w * startX; val x1 = x0 + w * swipeLen; val y = h * yPos
@@ -174,10 +169,10 @@ jobs:
                   val g = GestureDescription.Builder()
                       .addStroke(GestureDescription.StrokeDescription(p, 0, swipeMs)).build()
                   val ok = dispatchGesture(g, object : GestureResultCallback() {
-                      override fun onCompleted(d: GestureDescription?) { swipe() }
-                      override fun onCancelled(d: GestureDescription?) { handler.postDelayed({ swipe() }, 5) }
+                      override fun onCompleted(d: GestureDescription?) { swipe(id) }
+                      override fun onCancelled(d: GestureDescription?) { handler.postDelayed({ swipe(id) }, 5) }
                   }, null)
-                  if (!ok) handler.postDelayed({ swipe() }, 16)
+                  if (!ok) handler.postDelayed({ swipe(id) }, 16)
               }
 
               override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
