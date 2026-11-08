@@ -110,8 +110,7 @@ jobs:
               private val startX = 0.60f     // где начинается свайп (доля ширины экрана, правая половина = камера)
               private val swipeLen = 0.30f   // длина одного движения (доля ширины). Подбирай под 180°
               private val yPos = 0.50f       // высота свайпа (доля высоты)
-              private val segMs = 20L        // длительность одного движения, мс
-              private val segments = 6       // сколько движений туда-обратно за один свайп (чётное число)
+              private val swipeMs = 30L      // длительность одного свайпа, мс
               // ======================================
 
               private val handler = Handler(Looper.getMainLooper())
@@ -129,6 +128,10 @@ jobs:
               private var running = false
               private var editMode = false
               private var gen = 0
+              private var okCnt = 0
+              private var cxCnt = 0
+              private var failCnt = 0
+              private var toRight = true
 
               private var downX = 0f
               private var downY = 0f
@@ -144,7 +147,7 @@ jobs:
               private val helpText =
                   "1. Find Blocky Puffiest Classic on the Marketplace or in the Avatar Creator catalog.\n\n" +
                   "2. In your inventory open Body, scroll down a little, tap Full Body, find the right arm and equip it. It is not free: it costs 175 Robux.\n\n" +
-                  "3. You can make it better (not required): Atomical Blocky Legs, Atomical Blocky Left Arm, Beside Myself Torso and White Cat Head. Equip the legs, the left arm and the cat head. If you want, add the torso too, together with the Blocky Puffiest Classic right arm.\n\n" +
+                  "3. You can make it better (not required): Atomical Blocky Legs, Atomical Blocky Left Arm and Beside Myself Torso. Equip the legs and the left arm. If you want, add the torso too, together with the Blocky Puffiest Classic right arm. The head is not needed.\n\n" +
                   "4. Tap EDIT to move the HOLD button, and use + and - to change its size.\n\n" +
                   "5. To use it: hold the HOLD button, walk forward and hold jump."
 
@@ -348,6 +351,7 @@ jobs:
                       savePrefs()
                       setColor(holdBtn, green)
                       holdBtn?.text = "HOLD"
+                      holdBtn?.textSize = 18f
                       setColor(editBtn, green)
                       removeView(plusBtn)
                       removeView(minusBtn)
@@ -369,6 +373,9 @@ jobs:
                   if (running) return
                   running = true
                   gen++
+                  okCnt = 0
+                  cxCnt = 0
+                  failCnt = 0
                   setColor(holdBtn, red)
                   swipe(gen)
               }
@@ -376,6 +383,13 @@ jobs:
               private fun stopMacro() {
                   running = false
                   if (!editMode) setColor(holdBtn, green)
+              }
+
+              private fun updateStats() {
+                  if (editMode) return
+                  val b = holdBtn ?: return
+                  b.textSize = 11f
+                  b.text = "OK " + okCnt + "\nCX " + cxCnt + "\nF " + failCnt
               }
 
               @Suppress("DEPRECATION")
@@ -394,18 +408,34 @@ jobs:
                   val x1 = x0 + w * swipeLen
                   val y = h * yPos
                   val p = Path()
-                  p.moveTo(x0, y)
-                  for (i in 1..segments) {
-                      p.lineTo(if (i % 2 == 1) x1 else x0, y)
+                  if (toRight) {
+                      p.moveTo(x0, y)
+                      p.lineTo(x1, y)
+                  } else {
+                      p.moveTo(x1, y)
+                      p.lineTo(x0, y)
                   }
+                  toRight = !toRight
                   val g = GestureDescription.Builder()
-                      .addStroke(GestureDescription.StrokeDescription(p, 0, segMs * segments))
+                      .addStroke(GestureDescription.StrokeDescription(p, 0, swipeMs))
                       .build()
                   val ok = dispatchGesture(g, object : GestureResultCallback() {
-                      override fun onCompleted(d: GestureDescription?) { swipe(id) }
-                      override fun onCancelled(d: GestureDescription?) { handler.postDelayed({ swipe(id) }, 5) }
+                      override fun onCompleted(d: GestureDescription?) {
+                          okCnt++
+                          updateStats()
+                          swipe(id)
+                      }
+                      override fun onCancelled(d: GestureDescription?) {
+                          cxCnt++
+                          updateStats()
+                          handler.postDelayed({ swipe(id) }, 5)
+                      }
                   }, null)
-                  if (!ok) handler.postDelayed({ swipe(id) }, 16)
+                  if (!ok) {
+                      failCnt++
+                      updateStats()
+                      handler.postDelayed({ swipe(id) }, 16)
+                  }
               }
 
               override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
