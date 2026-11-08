@@ -106,21 +106,10 @@ jobs:
           class MacroService : AccessibilityService() {
 
               // ===== НАСТРОЙКИ (меняй под себя) =====
-              // Камера: свайпы в правой половине экрана
-              private val startX = 0.60f     // где начинается свайп (доля ширины экрана)
-              private val swipeLen = 0.30f   // длина одного свайпа (доля ширины). Подбирай под 180°
+              private val startX = 0.60f     // где начинается свайп (доля ширины экрана, правая половина = камера)
+              private val swipeLen = 0.30f   // длина свайпа (доля ширины). Подбирай, чтобы выходило ровно 180°
               private val yPos = 0.50f       // высота свайпа (доля высоты)
-              private val swipeMs = 16L      // длительность одного свайпа, мс (под 60 FPS)
-              private val swipeStep = 17L    // шаг между свайпами, мс (под 60 FPS)
-              private val swipes = 7         // сколько свайпов в одной порции
-              // Джойстик: макрос сам держит его вперёд
-              private val joyX = 0.12f       // где стоит джойстик (доля ширины)
-              private val joyY = 0.72f       // (доля высоты)
-              private val joyDrag = 0.12f    // насколько тянуть вверх (доля высоты)
-              // Прыжок: макрос сам держит кнопку прыжка
-              private val holdJump = true
-              private val jumpX = 0.90f      // где стоит кнопка прыжка (доля ширины)
-              private val jumpY = 0.75f      // (доля высоты)
+              private val swipeMs = 8L       // длительность одного свайпа, мс (как в первой версии)
               // ======================================
 
               private val handler = Handler(Looper.getMainLooper())
@@ -137,14 +126,10 @@ jobs:
               private var size = 240
               private var running = false
               private var editMode = false
-              private var wasRunning = false
               private var gen = 0
               private var okCnt = 0
               private var cxCnt = 0
-              private var failCnt = 0
               private var toRight = true
-              private var joy: GestureDescription.StrokeDescription? = null
-              private var jump: GestureDescription.StrokeDescription? = null
 
               private var downX = 0f
               private var downY = 0f
@@ -162,7 +147,7 @@ jobs:
                   "2. In your inventory open Body, scroll down a little, tap Full Body, find the right arm and equip it. It is not free: it costs 175 Robux.\n\n" +
                   "3. You can make it better (not required): Atomical Blocky Legs, Atomical Blocky Left Arm and Beside Myself Torso. Equip the legs and the left arm. If you want, add the torso too, together with the Blocky Puffiest Classic right arm. The head is not needed.\n\n" +
                   "4. Tap EDIT to move the START button, and use + and - to change its size.\n\n" +
-                  "5. Tap START. It walks forward, holds jump and spins the camera by itself. Touch the screen anywhere to stop it."
+                  "5. Tap START, then hold the joystick forward with one thumb and hold jump with the other. The macro spins the camera by itself. Tap STOP to stop it."
 
               private val green = "#AA2E7D32"
               private val red = "#AAC62828"
@@ -186,11 +171,8 @@ jobs:
                           MotionEvent.ACTION_UP -> savePrefs()
                       }
                   } else {
-                      when (e.action) {
-                          MotionEvent.ACTION_DOWN -> wasRunning = running
-                          MotionEvent.ACTION_UP -> {
-                              if (wasRunning) stopMacro() else handler.postDelayed({ startMacro() }, 250)
-                          }
+                      if (e.action == MotionEvent.ACTION_UP) {
+                          if (running) stopMacro() else startMacro()
                       }
                   }
                   true
@@ -389,10 +371,10 @@ jobs:
                   val b = holdBtn ?: return
                   if (running) {
                       b.textSize = 11f
-                      b.text = "STOP\nOK " + okCnt
-                  } else if (okCnt + cxCnt + failCnt > 0) {
+                      b.text = "STOP\nOK " + okCnt + "\nCX " + cxCnt
+                  } else if (okCnt + cxCnt > 0) {
                       b.textSize = 11f
-                      b.text = "START\nOK " + okCnt + "\nCX " + cxCnt + "\nF " + failCnt
+                      b.text = "START\nOK " + okCnt + "\nCX " + cxCnt
                   } else {
                       b.textSize = 18f
                       b.text = "START"
@@ -405,19 +387,14 @@ jobs:
                   gen++
                   okCnt = 0
                   cxCnt = 0
-                  failCnt = 0
-                  joy = null
-                  jump = null
                   toRight = true
                   setColor(holdBtn, red)
                   refreshLabel()
-                  chunk(gen)
+                  swipe(gen)
               }
 
               private fun stopMacro() {
                   running = false
-                  joy = null
-                  jump = null
                   if (!editMode) {
                       setColor(holdBtn, green)
                       refreshLabel()
@@ -431,97 +408,39 @@ jobs:
                   return dm
               }
 
-              private var mode = 0
-
-              private fun chunk(id: Int) {
+              private fun swipe(id: Int) {
                   if (!running || id != gen) return
-                  if (okCnt == 0 && cxCnt == 0) mode = 0
-                  failCnt = mode
                   val dm = screen()
                   val w = dm.widthPixels.toFloat()
                   val h = dm.heightPixels.toFloat()
-                  val chunkMs = swipeStep * swipes
-                  val b = GestureDescription.Builder()
-
-                  if (mode <= 1) {
-                      val jx = w * joyX
-                      val jy = h * joyY
-                      val jy2 = jy - h * joyDrag
-                      val pj = Path()
-                      val prevJoy = joy
-                      val js = if (prevJoy == null) {
-                          pj.moveTo(jx, jy)
-                          pj.lineTo(jx, jy2)
-                          GestureDescription.StrokeDescription(pj, 0, chunkMs, true)
-                      } else {
-                          pj.moveTo(jx, jy2)
-                          prevJoy.continueStroke(pj, 0, chunkMs, true)
-                      }
-                      joy = js
-                      b.addStroke(js)
-                  }
-
-                  if (mode == 0 && holdJump) {
-                      val pp = Path()
-                      pp.moveTo(w * jumpX, h * jumpY)
-                      val prevJump = jump
-                      val jd = if (prevJump == null) {
-                          GestureDescription.StrokeDescription(pp, 0, chunkMs, true)
-                      } else {
-                          prevJump.continueStroke(pp, 0, chunkMs, true)
-                      }
-                      jump = jd
-                      b.addStroke(jd)
-                  }
-
                   val x0 = w * startX
                   val x1 = x0 + w * swipeLen
                   val y = h * yPos
-                  for (i in 0 until swipes) {
-                      val pc = Path()
-                      if (toRight) {
-                          pc.moveTo(x0, y)
-                          pc.lineTo(x1, y)
-                      } else {
-                          pc.moveTo(x1, y)
-                          pc.lineTo(x0, y)
-                      }
-                      toRight = !toRight
-                      b.addStroke(GestureDescription.StrokeDescription(pc, i * swipeStep, swipeMs))
+                  val p = Path()
+                  if (toRight) {
+                      p.moveTo(x0, y)
+                      p.lineTo(x1, y)
+                  } else {
+                      p.moveTo(x1, y)
+                      p.lineTo(x0, y)
                   }
-
-                  val ok = dispatchGesture(b.build(), object : GestureResultCallback() {
+                  toRight = !toRight
+                  val g = GestureDescription.Builder()
+                      .addStroke(GestureDescription.StrokeDescription(p, 0, swipeMs))
+                      .build()
+                  val ok = dispatchGesture(g, object : GestureResultCallback() {
                       override fun onCompleted(d: GestureDescription?) {
-                          if (running && id == gen) {
-                              okCnt++
-                              refreshLabel()
-                              chunk(id)
-                          }
+                          okCnt++
+                          if ((okCnt + cxCnt) % 10 == 0) refreshLabel()
+                          swipe(id)
                       }
                       override fun onCancelled(d: GestureDescription?) {
-                          if (running && id == gen) {
-                              cxCnt++
-                              joy = null
-                              jump = null
-                              if (okCnt == 0 && mode < 2) {
-                                  mode++
-                                  handler.postDelayed({ chunk(id) }, 300)
-                              } else {
-                                  stopMacro()
-                              }
-                          }
+                          cxCnt++
+                          if ((okCnt + cxCnt) % 10 == 0) refreshLabel()
+                          handler.postDelayed({ swipe(id) }, 5)
                       }
                   }, null)
-                  if (!ok) {
-                      joy = null
-                      jump = null
-                      if (mode < 2) {
-                          mode++
-                          handler.postDelayed({ chunk(id) }, 300)
-                      } else {
-                          stopMacro()
-                      }
-                  }
+                  if (!ok) handler.postDelayed({ swipe(id) }, 16)
               }
 
               override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
