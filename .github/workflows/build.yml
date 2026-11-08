@@ -110,8 +110,8 @@ jobs:
               private val startX = 0.60f     // где начинается свайп (доля ширины экрана)
               private val swipeLen = 0.30f   // длина одного свайпа (доля ширины). Подбирай под 180°
               private val yPos = 0.50f       // высота свайпа (доля высоты)
-              private val swipeMs = 30L      // длительность одного свайпа, мс
-              private val swipeStep = 40L    // шаг между свайпами, мс
+              private val swipeMs = 16L      // длительность одного свайпа, мс (под 60 FPS)
+              private val swipeStep = 17L    // шаг между свайпами, мс (под 60 FPS)
               private val swipes = 7         // сколько свайпов в одной порции
               // Джойстик: макрос сам держит его вперёд
               private val joyX = 0.12f       // где стоит джойстик (доля ширины)
@@ -431,37 +431,39 @@ jobs:
                   return dm
               }
 
+              private var mode = 0
+
               private fun chunk(id: Int) {
                   if (!running || id != gen) return
+                  if (okCnt == 0 && cxCnt == 0) mode = 0
+                  failCnt = mode
                   val dm = screen()
                   val w = dm.widthPixels.toFloat()
                   val h = dm.heightPixels.toFloat()
                   val chunkMs = swipeStep * swipes
                   val b = GestureDescription.Builder()
 
-                  // джойстик вперёд (держится между порциями)
-                  val jx = w * joyX
-                  val jy = h * joyY
-                  val jy2 = jy - h * joyDrag
-                  val pj = Path()
-                  val prevJoy = joy
-                  val js = if (prevJoy == null) {
-                      pj.moveTo(jx, jy)
-                      pj.lineTo(jx, jy2)
-                      GestureDescription.StrokeDescription(pj, 0, chunkMs, true)
-                  } else {
-                      pj.moveTo(jx, jy2)
-                      prevJoy.continueStroke(pj, 0, chunkMs, true)
+                  if (mode <= 1) {
+                      val jx = w * joyX
+                      val jy = h * joyY
+                      val jy2 = jy - h * joyDrag
+                      val pj = Path()
+                      val prevJoy = joy
+                      val js = if (prevJoy == null) {
+                          pj.moveTo(jx, jy)
+                          pj.lineTo(jx, jy2)
+                          GestureDescription.StrokeDescription(pj, 0, chunkMs, true)
+                      } else {
+                          pj.moveTo(jx, jy2)
+                          prevJoy.continueStroke(pj, 0, chunkMs, true)
+                      }
+                      joy = js
+                      b.addStroke(js)
                   }
-                  joy = js
-                  b.addStroke(js)
 
-                  // кнопка прыжка (держится между порциями)
-                  if (holdJump) {
-                      val px = w * jumpX
-                      val py = h * jumpY
+                  if (mode == 0 && holdJump) {
                       val pp = Path()
-                      pp.moveTo(px, py)
+                      pp.moveTo(w * jumpX, h * jumpY)
                       val prevJump = jump
                       val jd = if (prevJump == null) {
                           GestureDescription.StrokeDescription(pp, 0, chunkMs, true)
@@ -472,7 +474,6 @@ jobs:
                       b.addStroke(jd)
                   }
 
-                  // свайпы камеры туда-обратно
                   val x0 = w * startX
                   val x1 = x0 + w * swipeLen
                   val y = h * yPos
@@ -500,13 +501,26 @@ jobs:
                       override fun onCancelled(d: GestureDescription?) {
                           if (running && id == gen) {
                               cxCnt++
-                              stopMacro()
+                              joy = null
+                              jump = null
+                              if (okCnt == 0 && mode < 2) {
+                                  mode++
+                                  handler.postDelayed({ chunk(id) }, 300)
+                              } else {
+                                  stopMacro()
+                              }
                           }
                       }
                   }, null)
                   if (!ok) {
-                      failCnt++
-                      stopMacro()
+                      joy = null
+                      jump = null
+                      if (mode < 2) {
+                          mode++
+                          handler.postDelayed({ chunk(id) }, 300)
+                      } else {
+                          stopMacro()
+                      }
                   }
               }
 
