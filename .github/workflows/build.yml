@@ -3,9 +3,8 @@ on:
   workflow_dispatch:
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
       - name: Create project files
         run: |
           mkdir -p $(dirname settings.gradle.kts)
@@ -525,14 +524,36 @@ jobs:
               }
           }
           EOF
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 8.7
-      - run: gradle assembleDebug
+      - name: Build APK
+        run: |
+          if [ -n "$JAVA_HOME_17_X64" ]; then
+            export JAVA_HOME="$JAVA_HOME_17_X64"
+            export PATH="$JAVA_HOME/bin:$PATH"
+          fi
+          java -version
+          ok=0
+          for url in \
+            https://mirrors.cloud.tencent.com/gradle/gradle-8.7-bin.zip \
+            https://repo.huaweicloud.com/gradle/gradle-8.7-bin.zip \
+            https://services.gradle.org/distributions/gradle-8.7-bin.zip \
+            https://downloads.gradle.org/distributions/gradle-8.7-bin.zip
+          do
+            echo "Trying $url"
+            rm -f gradle.zip
+            if curl -fsSL --retry 2 --retry-delay 3 --retry-all-errors -o gradle.zip "$url" && unzip -tq gradle.zip > /dev/null 2>&1; then
+              ok=1
+              break
+            fi
+          done
+          if [ "$ok" = "1" ]; then
+            unzip -q gradle.zip -d "$HOME"
+            G="$HOME/gradle-8.7/bin/gradle"
+          else
+            echo "Download failed, using Gradle installed on the runner"
+            gradle --version
+            G=gradle
+          fi
+          "$G" assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: SpeedMacro-apk
