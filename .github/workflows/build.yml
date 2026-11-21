@@ -71,6 +71,8 @@ jobs:
               android:accessibilityEventTypes="typeAllMask"
               android:accessibilityFeedbackType="feedbackGeneric"
               android:canPerformGestures="true"
+              android:canRequestFilterKeyEvents="true"
+              android:accessibilityFlags="flagRequestFilterKeyEvents"
               android:description="@string/service_desc"
               android:notificationTimeout="100" />
           EOF
@@ -95,6 +97,7 @@ jobs:
           import android.os.Looper
           import android.util.DisplayMetrics
           import android.view.Gravity
+          import android.view.KeyEvent
           import android.view.MotionEvent
           import android.view.View
           import android.view.WindowManager
@@ -130,6 +133,8 @@ jobs:
               private var okCnt = 0
               private var cxCnt = 0
               private var toRight = true
+              private val maxRunMs = 30000L
+              private val stopRunnable = Runnable { stopMacro() }
 
               private var downX = 0f
               private var downY = 0f
@@ -147,7 +152,7 @@ jobs:
                   "2. In your inventory open Body, scroll down a little, tap Full Body, find the right arm and equip it. It is not free: it costs 175 Robux.\n\n" +
                   "3. You can make it better (not required): Atomical Blocky Legs, Atomical Blocky Left Arm and Beside Myself Torso. Equip the legs and the left arm. If you want, add the torso too, together with the Blocky Puffiest Classic right arm. The head is not needed.\n\n" +
                   "4. Tap EDIT to move the START button, and use + and - to change its size.\n\n" +
-                  "5. Tap START, then hold the joystick forward with one thumb and hold jump with the other. The macro spins the camera by itself. Tap STOP to stop it."
+                  "5. Hold the joystick forward and hold jump with your thumbs. Then hold the VOLUME DOWN button: the macro spins the camera while you hold it and stops when you let go. VOLUME UP also stops it. It stops by itself after 30 seconds."
 
               private val green = "#AA2E7D32"
               private val red = "#AAC62828"
@@ -171,7 +176,7 @@ jobs:
                           MotionEvent.ACTION_UP -> savePrefs()
                       }
                   } else {
-                      if (e.action == MotionEvent.ACTION_UP) {
+                      if (e.actionMasked == MotionEvent.ACTION_DOWN) {
                           if (running) stopMacro() else startMacro()
                       }
                   }
@@ -388,6 +393,8 @@ jobs:
                   okCnt = 0
                   cxCnt = 0
                   toRight = true
+                  handler.removeCallbacks(stopRunnable)
+                  handler.postDelayed(stopRunnable, maxRunMs)
                   setColor(holdBtn, red)
                   refreshLabel()
                   swipe(gen)
@@ -395,6 +402,7 @@ jobs:
 
               private fun stopMacro() {
                   running = false
+                  handler.removeCallbacks(stopRunnable)
                   if (!editMode) {
                       setColor(holdBtn, green)
                       refreshLabel()
@@ -432,15 +440,33 @@ jobs:
                       override fun onCompleted(d: GestureDescription?) {
                           okCnt++
                           if ((okCnt + cxCnt) % 10 == 0) refreshLabel()
-                          swipe(id)
+                          handler.post { swipe(id) }
                       }
                       override fun onCancelled(d: GestureDescription?) {
                           cxCnt++
-                          if ((okCnt + cxCnt) % 10 == 0) refreshLabel()
-                          handler.postDelayed({ swipe(id) }, 5)
+                          if (cxCnt > 200 && okCnt == 0) {
+                              stopMacro()
+                          } else {
+                              if ((okCnt + cxCnt) % 10 == 0) refreshLabel()
+                              handler.postDelayed({ swipe(id) }, 5)
+                          }
                       }
                   }, null)
                   if (!ok) handler.postDelayed({ swipe(id) }, 16)
+              }
+
+              override fun onKeyEvent(event: KeyEvent): Boolean {
+                  if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP && running) {
+                      if (event.action == KeyEvent.ACTION_DOWN) stopMacro()
+                      return true
+                  }
+                  if (event.keyCode != KeyEvent.KEYCODE_VOLUME_DOWN) return false
+                  if (event.action == KeyEvent.ACTION_DOWN) {
+                      if (event.repeatCount == 0) startMacro()
+                  } else if (event.action == KeyEvent.ACTION_UP) {
+                      stopMacro()
+                  }
+                  return true
               }
 
               override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
