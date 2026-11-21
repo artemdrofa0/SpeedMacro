@@ -110,9 +110,10 @@ jobs:
 
               // ===== НАСТРОЙКИ (меняй под себя) =====
               // Место и длину свайпа камеры теперь задаёшь кнопкой EDIT (синяя полоса SWIPE)
-              private val swipeMs = 20L      // длительность одного движения (туда или сюда), мс
-              private val segments = 6       // сколько движений в одном касании (чётное число)
-              private val gapMs = 12L        // пауза между касаниями, мс
+              private val swipeMs = 30L      // длительность одного свайпа (туда или сюда), мс
+              private val swipeGap = 4L      // пауза между свайпами внутри одной порции, мс
+              private val camSwipes = 8      // сколько свайпов камеры в одной порции (чётное число, не больше 8)
+              private val gapMs = 12L        // пауза между порциями, мс
               private val markerH = 120      // высота синей полосы SWIPE, px
               private val joyDrag = 0.12f    // насколько макрос тянет джойстик вверх (доля высоты экрана)
               private val pointSize = 140    // размер квадратов JOY и JUMP, px
@@ -145,8 +146,7 @@ jobs:
               private var kxF = 0.90f        // где стоит кнопка прыжка (доля ширины)
               private var kyF = 0.75f        // (доля высоты)
               private var mode = 0           // 0 = идти + прыгать + камера, 1 = идти + камера, 2 = только камера
-              private var joy: GestureDescription.StrokeDescription? = null
-              private var jump: GestureDescription.StrokeDescription? = null
+              private var failCnt = 0
               private var sxF = 0.60f        // где начинается свайп (доля ширины экрана)
               private var syF = 0.50f        // высота свайпа (доля высоты экрана)
               private var slF = 0.30f        // длина свайпа (доля ширины экрана)
@@ -177,7 +177,7 @@ jobs:
               private val helpText =
                   "1. Find Blocky Puffiest Classic on the Marketplace or in the Avatar Creator catalog.\n\n" +
                   "2. In your inventory open Body, scroll down a little, tap Full Body, find the right arm and equip it. It is not free: it costs 175 Robux.\n\n" +
-                  "3. You can make it better (not required): Atomical Blocky Legs, Atomical Blocky Left Arm and Beside Myself Torso. Equip the legs and the left arm. If you want, add the torso too, together with the Blocky Puffiest Classic right arm. The head is not needed.\n\n" +
+                  "3. You can make it better (not required): Atomical Blocky Legs, Atomical Blocky Left Arm and Hes Back Torso. Equip the legs and the left arm. If you want, add the torso too, together with the Blocky Puffiest Classic right arm. The head is not needed.\n\n" +
                   "4. Tap EDIT. Drag the blue SWIPE bar where the camera should turn, the JOY square onto your joystick and the JUMP square onto your jump button. Use W+ and W- to change the length of the swipe, and + and - to change the START button size. Tap EDIT again to save.\n\n" +
                   "5. Do not touch the screen. Hold the VOLUME DOWN button: the macro walks forward, holds jump and spins the camera while you hold it, and stops when you let go. VOLUME UP also stops it. It stops by itself after 30 seconds."
 
@@ -580,9 +580,9 @@ jobs:
                   if (running) {
                       b.textSize = 11f
                       b.text = "STOP\nOK " + okCnt + "\nCX " + cxCnt
-                  } else if (okCnt + cxCnt > 0) {
+                  } else if (okCnt + cxCnt + failCnt > 0) {
                       b.textSize = 11f
-                      b.text = "START\nOK " + okCnt + "\nCX " + cxCnt + "\nM " + mode
+                      b.text = "START\nOK " + okCnt + "\nCX " + cxCnt + "\nF " + failCnt + "\nM " + mode
                   } else {
                       b.textSize = 18f
                       b.text = "START"
@@ -596,8 +596,7 @@ jobs:
                   okCnt = 0
                   cxCnt = 0
                   mode = 0
-                  joy = null
-                  jump = null
+                  failCnt = 0
                   closeHelp()
                   handler.removeCallbacks(stopRunnable)
                   handler.postDelayed(stopRunnable, maxRunMs)
@@ -608,8 +607,6 @@ jobs:
 
               private fun stopMacro() {
                   running = false
-                  joy = null
-                  jump = null
                   handler.removeCallbacks(stopRunnable)
                   if (!editMode) {
                       setColor(holdBtn, green)
@@ -622,49 +619,37 @@ jobs:
                   val dm = screen()
                   val w = dm.widthPixels.toFloat()
                   val h = dm.heightPixels.toFloat()
-                  val chunkMs = swipeMs * segments
+                  val step = swipeMs + swipeGap
+                  val chunkMs = step * camSwipes
                   val b = GestureDescription.Builder()
 
                   if (mode <= 1) {
-                      val jx = w * jxF
-                      val jy = h * jyF
-                      val jy2 = jy - h * joyDrag
                       val pj = Path()
-                      val prevJoy = joy
-                      val js = if (prevJoy == null) {
-                          pj.moveTo(jx, jy)
-                          pj.lineTo(jx, jy2)
-                          GestureDescription.StrokeDescription(pj, 0, chunkMs, true)
-                      } else {
-                          pj.moveTo(jx, jy2)
-                          prevJoy.continueStroke(pj, 0, chunkMs, true)
-                      }
-                      joy = js
-                      b.addStroke(js)
+                      pj.moveTo(w * jxF, h * jyF)
+                      pj.lineTo(w * jxF, h * jyF - h * joyDrag)
+                      b.addStroke(GestureDescription.StrokeDescription(pj, 0, chunkMs))
                   }
 
                   if (mode == 0) {
                       val pp = Path()
                       pp.moveTo(w * kxF, h * kyF)
-                      val prevJump = jump
-                      val jd = if (prevJump == null) {
-                          GestureDescription.StrokeDescription(pp, 0, chunkMs, true)
-                      } else {
-                          prevJump.continueStroke(pp, 0, chunkMs, true)
-                      }
-                      jump = jd
-                      b.addStroke(jd)
+                      b.addStroke(GestureDescription.StrokeDescription(pp, 0, chunkMs))
                   }
 
                   val x0 = w * sxF
                   val x1 = x0 + w * slF
                   val y = h * syF
-                  val p = Path()
-                  p.moveTo(x0, y)
-                  for (i in 1..segments) {
-                      p.lineTo(if (i % 2 == 1) x1 else x0, y)
+                  for (i in 0 until camSwipes) {
+                      val pc = Path()
+                      if (i % 2 == 0) {
+                          pc.moveTo(x0, y)
+                          pc.lineTo(x1, y)
+                      } else {
+                          pc.moveTo(x1, y)
+                          pc.lineTo(x0, y)
+                      }
+                      b.addStroke(GestureDescription.StrokeDescription(pc, i * step, swipeMs))
                   }
-                  b.addStroke(GestureDescription.StrokeDescription(p, 0, chunkMs))
 
                   val ok = dispatchGesture(b.build(), object : GestureResultCallback() {
                       override fun onCompleted(d: GestureDescription?) {
@@ -674,8 +659,6 @@ jobs:
                       }
                       override fun onCancelled(d: GestureDescription?) {
                           cxCnt++
-                          joy = null
-                          jump = null
                           if (okCnt == 0 && mode < 2) {
                               mode++
                               handler.postDelayed({ swipe(id) }, 300)
@@ -688,8 +671,7 @@ jobs:
                       }
                   }, null)
                   if (!ok) {
-                      joy = null
-                      jump = null
+                      failCnt++
                       if (mode < 2) {
                           mode++
                           handler.postDelayed({ swipe(id) }, 300)
