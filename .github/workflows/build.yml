@@ -109,10 +109,11 @@ jobs:
           class MacroService : AccessibilityService() {
 
               // ===== НАСТРОЙКИ (меняй под себя) =====
-              private val startX = 0.60f     // где начинается свайп (доля ширины экрана, правая половина = камера)
-              private val swipeLen = 0.30f   // длина свайпа (доля ширины). Подбирай, чтобы выходило ровно 180°
-              private val yPos = 0.50f       // высота свайпа (доля высоты)
-              private val swipeMs = 8L       // длительность одного свайпа, мс (как в первой версии)
+              // Место и длину свайпа камеры теперь задаёшь кнопкой EDIT (синяя полоса SWIPE)
+              private val swipeMs = 20L      // длительность одного движения (туда или сюда), мс
+              private val segments = 6       // сколько движений в одном касании (чётное число)
+              private val gapMs = 12L        // пауза между касаниями, мс
+              private val markerH = 120      // высота синей полосы SWIPE, px
               // ======================================
 
               private val handler = Handler(Looper.getMainLooper())
@@ -121,12 +122,21 @@ jobs:
               private var editBtn: Button? = null
               private var plusBtn: Button? = null
               private var minusBtn: Button? = null
+              private var wPlusBtn: Button? = null
+              private var wMinusBtn: Button? = null
+              private var markerView: TextView? = null
               private var helpView: View? = null
               private lateinit var holdLp: WindowManager.LayoutParams
               private lateinit var editLp: WindowManager.LayoutParams
               private var plusLp: WindowManager.LayoutParams? = null
               private var minusLp: WindowManager.LayoutParams? = null
+              private var wPlusLp: WindowManager.LayoutParams? = null
+              private var wMinusLp: WindowManager.LayoutParams? = null
+              private var markerLp: WindowManager.LayoutParams? = null
               private var size = 240
+              private var sxF = 0.60f        // где начинается свайп (доля ширины экрана)
+              private var syF = 0.50f        // высота свайпа (доля высоты экрана)
+              private var slF = 0.30f        // длина свайпа (доля ширины экрана)
               private var running = false
               private var editMode = false
               private var gen = 0
@@ -146,11 +156,16 @@ jobs:
               private var eStartY = 0
               private var eMoved = false
 
+              private var mDownX = 0f
+              private var mDownY = 0f
+              private var mStartX = 0
+              private var mStartY = 0
+
               private val helpText =
                   "1. Find Blocky Puffiest Classic on the Marketplace or in the Avatar Creator catalog.\n\n" +
                   "2. In your inventory open Body, scroll down a little, tap Full Body, find the right arm and equip it. It is not free: it costs 175 Robux.\n\n" +
                   "3. You can make it better (not required): Atomical Blocky Legs, Atomical Blocky Left Arm and Beside Myself Torso. Equip the legs and the left arm. If you want, add the torso too, together with the Blocky Puffiest Classic right arm. The head is not needed.\n\n" +
-                  "4. Tap EDIT to move the START button, and use + and - to change its size.\n\n" +
+                  "4. Tap EDIT. Drag the blue SWIPE bar where the camera should turn, use W+ and W- to change its length, and use + and - to change the START button size. Tap EDIT again to save.\n\n" +
                   "5. Hold the joystick forward and hold jump with your thumbs. Then hold the VOLUME DOWN button: the macro spins the camera while you hold it and stops when you let go. VOLUME UP also stops it. It stops by itself after 30 seconds."
 
               private val green = "#AA2E7D32"
@@ -209,6 +224,31 @@ jobs:
                   true
               }
 
+              private val markerTouch = View.OnTouchListener { _, e ->
+                  val ml = markerLp
+                  if (ml != null) {
+                      when (e.action) {
+                          MotionEvent.ACTION_DOWN -> {
+                              mDownX = e.rawX
+                              mDownY = e.rawY
+                              mStartX = ml.x
+                              mStartY = ml.y
+                          }
+                          MotionEvent.ACTION_MOVE -> {
+                              ml.x = maxOf(0, mStartX + (e.rawX - mDownX).toInt())
+                              ml.y = maxOf(0, mStartY + (e.rawY - mDownY).toInt())
+                              markerView?.let { wm.updateViewLayout(it, ml) }
+                              syncMarker()
+                          }
+                          MotionEvent.ACTION_UP -> {
+                              syncMarker()
+                              savePrefs()
+                          }
+                      }
+                  }
+                  true
+              }
+
               private fun lp(w: Int, h: Int, g: Int, px: Int, py: Int): WindowManager.LayoutParams {
                   val p = WindowManager.LayoutParams(
                       w, h,
@@ -239,6 +279,13 @@ jobs:
                   if (v != null) {
                       try { wm.removeView(v) } catch (_: Exception) {}
                   }
+              }
+
+              @Suppress("DEPRECATION")
+              private fun screen(): DisplayMetrics {
+                  val dm = DisplayMetrics()
+                  wm.defaultDisplay.getRealMetrics(dm)
+                  return dm
               }
 
               private fun showHelp() {
@@ -291,6 +338,9 @@ jobs:
                       .putInt("size", size)
                       .putInt("ex", editLp.x)
                       .putInt("ey", editLp.y)
+                      .putFloat("sx", sxF)
+                      .putFloat("sy", syF)
+                      .putFloat("sl", slF)
                       .apply()
               }
 
@@ -298,6 +348,9 @@ jobs:
                   wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
                   val prefs = getSharedPreferences("speedmacro", Context.MODE_PRIVATE)
                   size = prefs.getInt("size", 240)
+                  sxF = prefs.getFloat("sx", 0.60f)
+                  syF = prefs.getFloat("sy", 0.50f)
+                  slF = prefs.getFloat("sl", 0.30f)
                   holdLp = lp(size, size, Gravity.TOP or Gravity.END, prefs.getInt("hx", 330), prefs.getInt("hy", 200))
                   editLp = lp(170, 110, Gravity.TOP or Gravity.END, prefs.getInt("ex", 20), prefs.getInt("ey", 200))
 
@@ -314,19 +367,65 @@ jobs:
                   showHelp()
               }
 
+              private fun addExtra(b: Button, dy: Int): WindowManager.LayoutParams {
+                  val l = lp(170, 110, Gravity.TOP or Gravity.END, editLp.x, editLp.y + dy)
+                  wm.addView(b, l)
+                  return l
+              }
+
+              private fun moveExtra(b: Button?, l: WindowManager.LayoutParams?, dy: Int) {
+                  if (b != null && l != null) {
+                      l.x = editLp.x
+                      l.y = editLp.y + dy
+                      wm.updateViewLayout(b, l)
+                  }
+              }
+
               private fun layoutExtras() {
-                  val pl = plusLp
-                  val ml = minusLp
-                  if (pl != null) {
-                      pl.x = editLp.x
-                      pl.y = editLp.y + 120
-                      plusBtn?.let { wm.updateViewLayout(it, pl) }
-                  }
-                  if (ml != null) {
-                      ml.x = editLp.x
-                      ml.y = editLp.y + 240
-                      minusBtn?.let { wm.updateViewLayout(it, ml) }
-                  }
+                  moveExtra(plusBtn, plusLp, 120)
+                  moveExtra(minusBtn, minusLp, 240)
+                  moveExtra(wPlusBtn, wPlusLp, 360)
+                  moveExtra(wMinusBtn, wMinusLp, 480)
+              }
+
+              private fun showMarker() {
+                  val dm = screen()
+                  val w = dm.widthPixels.toFloat()
+                  val h = dm.heightPixels.toFloat()
+                  val mw = (slF * w).toInt()
+                  val mx = (sxF * w).toInt()
+                  val my = (syF * h).toInt() - markerH / 2
+                  val l = lp(mw, markerH, Gravity.TOP or Gravity.START, maxOf(0, mx), maxOf(0, my))
+                  val tv = TextView(this)
+                  tv.text = "SWIPE: drag me"
+                  tv.textSize = 14f
+                  tv.gravity = Gravity.CENTER
+                  tv.setTextColor(Color.WHITE)
+                  tv.setBackgroundColor(Color.parseColor(blue))
+                  tv.setOnTouchListener(markerTouch)
+                  markerView = tv
+                  markerLp = l
+                  wm.addView(tv, l)
+              }
+
+              private fun syncMarker() {
+                  val ml = markerLp ?: return
+                  val dm = screen()
+                  val w = dm.widthPixels.toFloat()
+                  val h = dm.heightPixels.toFloat()
+                  sxF = ml.x / w
+                  syF = (ml.y + markerH / 2) / h
+                  slF = ml.width / w
+              }
+
+              private fun resizeSwipe(d: Int) {
+                  val ml = markerLp ?: return
+                  val dm = screen()
+                  val w = dm.widthPixels
+                  ml.width = (ml.width + d).coerceIn((w * 0.1f).toInt(), (w * 0.6f).toInt())
+                  markerView?.let { wm.updateViewLayout(it, ml) }
+                  syncMarker()
+                  savePrefs()
               }
 
               private fun toggleEdit() {
@@ -341,14 +440,19 @@ jobs:
                       pb.setOnClickListener { resize(30) }
                       val mb = makeBtn("-", gray, 22f)
                       mb.setOnClickListener { resize(-30) }
-                      val pl = lp(170, 110, Gravity.TOP or Gravity.END, editLp.x, editLp.y + 120)
-                      val ml = lp(170, 110, Gravity.TOP or Gravity.END, editLp.x, editLp.y + 240)
+                      val wpb = makeBtn("W+", gray, 16f)
+                      wpb.setOnClickListener { resizeSwipe(40) }
+                      val wmb = makeBtn("W-", gray, 16f)
+                      wmb.setOnClickListener { resizeSwipe(-40) }
                       plusBtn = pb
                       minusBtn = mb
-                      plusLp = pl
-                      minusLp = ml
-                      wm.addView(pb, pl)
-                      wm.addView(mb, ml)
+                      wPlusBtn = wpb
+                      wMinusBtn = wmb
+                      plusLp = addExtra(pb, 120)
+                      minusLp = addExtra(mb, 240)
+                      wPlusLp = addExtra(wpb, 360)
+                      wMinusLp = addExtra(wmb, 480)
+                      showMarker()
                   } else {
                       savePrefs()
                       setColor(holdBtn, green)
@@ -356,10 +460,19 @@ jobs:
                       refreshLabel()
                       removeView(plusBtn)
                       removeView(minusBtn)
+                      removeView(wPlusBtn)
+                      removeView(wMinusBtn)
+                      removeView(markerView)
                       plusBtn = null
                       minusBtn = null
+                      wPlusBtn = null
+                      wMinusBtn = null
+                      markerView = null
                       plusLp = null
                       minusLp = null
+                      wPlusLp = null
+                      wMinusLp = null
+                      markerLp = null
                   }
               }
 
@@ -407,36 +520,27 @@ jobs:
                   }
               }
 
-              @Suppress("DEPRECATION")
-              private fun screen(): DisplayMetrics {
-                  val dm = DisplayMetrics()
-                  wm.defaultDisplay.getRealMetrics(dm)
-                  return dm
-              }
-
               private fun swipe(id: Int) {
                   if (!running || id != gen) return
                   val dm = screen()
                   val w = dm.widthPixels.toFloat()
                   val h = dm.heightPixels.toFloat()
-                  val x0 = w * startX
-                  val x1 = x0 + w * swipeLen
-                  val y = h * yPos
-                  val p1 = Path()
-                  p1.moveTo(x0, y)
-                  p1.lineTo(x1, y)
-                  val p2 = Path()
-                  p2.moveTo(x1, y)
-                  p2.lineTo(x0, y)
+                  val x0 = w * sxF
+                  val x1 = x0 + w * slF
+                  val y = h * syF
+                  val p = Path()
+                  p.moveTo(x0, y)
+                  for (i in 1..segments) {
+                      p.lineTo(if (i % 2 == 1) x1 else x0, y)
+                  }
                   val g = GestureDescription.Builder()
-                      .addStroke(GestureDescription.StrokeDescription(p1, 0, swipeMs))
-                      .addStroke(GestureDescription.StrokeDescription(p2, swipeMs + 4, swipeMs))
+                      .addStroke(GestureDescription.StrokeDescription(p, 0, swipeMs * segments))
                       .build()
                   val ok = dispatchGesture(g, object : GestureResultCallback() {
                       override fun onCompleted(d: GestureDescription?) {
                           okCnt++
                           if ((okCnt + cxCnt) % 10 == 0) refreshLabel()
-                          handler.post { swipe(id) }
+                          handler.postDelayed({ swipe(id) }, gapMs)
                       }
                       override fun onCancelled(d: GestureDescription?) {
                           cxCnt++
@@ -474,6 +578,9 @@ jobs:
                   removeView(editBtn)
                   removeView(plusBtn)
                   removeView(minusBtn)
+                  removeView(wPlusBtn)
+                  removeView(wMinusBtn)
+                  removeView(markerView)
                   removeView(helpView)
                   super.onDestroy()
               }
