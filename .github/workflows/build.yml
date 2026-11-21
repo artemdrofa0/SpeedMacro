@@ -132,7 +132,6 @@ jobs:
               private var gen = 0
               private var okCnt = 0
               private var cxCnt = 0
-              private var toRight = true
               private val maxRunMs = 30000L
               private val stopRunnable = Runnable { stopMacro() }
 
@@ -392,7 +391,6 @@ jobs:
                   gen++
                   okCnt = 0
                   cxCnt = 0
-                  toRight = true
                   handler.removeCallbacks(stopRunnable)
                   handler.postDelayed(stopRunnable, maxRunMs)
                   setColor(holdBtn, red)
@@ -424,17 +422,15 @@ jobs:
                   val x0 = w * startX
                   val x1 = x0 + w * swipeLen
                   val y = h * yPos
-                  val p = Path()
-                  if (toRight) {
-                      p.moveTo(x0, y)
-                      p.lineTo(x1, y)
-                  } else {
-                      p.moveTo(x1, y)
-                      p.lineTo(x0, y)
-                  }
-                  toRight = !toRight
+                  val p1 = Path()
+                  p1.moveTo(x0, y)
+                  p1.lineTo(x1, y)
+                  val p2 = Path()
+                  p2.moveTo(x1, y)
+                  p2.lineTo(x0, y)
                   val g = GestureDescription.Builder()
-                      .addStroke(GestureDescription.StrokeDescription(p, 0, swipeMs))
+                      .addStroke(GestureDescription.StrokeDescription(p1, 0, swipeMs))
+                      .addStroke(GestureDescription.StrokeDescription(p2, swipeMs + 4, swipeMs))
                       .build()
                   val ok = dispatchGesture(g, object : GestureResultCallback() {
                       override fun onCompleted(d: GestureDescription?) {
