@@ -110,10 +110,12 @@ jobs:
 
               // ===== НАСТРОЙКИ (меняй под себя) =====
               // Место и длину свайпа камеры теперь задаёшь кнопкой EDIT (синяя полоса SWIPE)
-              private val swipeMs = 17L      // длительность одного движения (туда или сюда), мс (под 60 FPS)
+              private val swipeMs = 20L      // длительность одного движения (туда или сюда), мс
               private val segments = 6       // сколько движений в одном касании (чётное число)
               private val gapMs = 12L        // пауза между касаниями, мс
               private val markerH = 120      // высота синей полосы SWIPE, px
+              private val joyDrag = 0.12f    // насколько макрос тянет джойстик вверх (доля высоты экрана)
+              private val pointSize = 140    // размер квадратов JOY и JUMP, px
               // ======================================
 
               private val handler = Handler(Looper.getMainLooper())
@@ -133,7 +135,18 @@ jobs:
               private var wPlusLp: WindowManager.LayoutParams? = null
               private var wMinusLp: WindowManager.LayoutParams? = null
               private var markerLp: WindowManager.LayoutParams? = null
+              private var joyView: TextView? = null
+              private var jumpView: TextView? = null
+              private var joyLp: WindowManager.LayoutParams? = null
+              private var jumpLp: WindowManager.LayoutParams? = null
               private var size = 240
+              private var jxF = 0.12f        // где стоит джойстик (доля ширины)
+              private var jyF = 0.72f        // (доля высоты)
+              private var kxF = 0.90f        // где стоит кнопка прыжка (доля ширины)
+              private var kyF = 0.75f        // (доля высоты)
+              private var mode = 0           // 0 = идти + прыгать + камера, 1 = идти + камера, 2 = только камера
+              private var joy: GestureDescription.StrokeDescription? = null
+              private var jump: GestureDescription.StrokeDescription? = null
               private var sxF = 0.60f        // где начинается свайп (доля ширины экрана)
               private var syF = 0.50f        // высота свайпа (доля высоты экрана)
               private var slF = 0.30f        // длина свайпа (доля ширины экрана)
@@ -165,8 +178,8 @@ jobs:
                   "1. Find Blocky Puffiest Classic on the Marketplace or in the Avatar Creator catalog.\n\n" +
                   "2. In your inventory open Body, scroll down a little, tap Full Body, find the right arm and equip it. It is not free: it costs 175 Robux.\n\n" +
                   "3. You can make it better (not required): Atomical Blocky Legs, Atomical Blocky Left Arm and Beside Myself Torso. Equip the legs and the left arm. If you want, add the torso too, together with the Blocky Puffiest Classic right arm. The head is not needed.\n\n" +
-                  "4. Tap EDIT. Drag the blue SWIPE bar where the camera should turn, use W+ and W- to change its length, and use + and - to change the START button size. Tap EDIT again to save.\n\n" +
-                  "5. Hold the joystick forward and hold jump with your thumbs. Then hold the VOLUME DOWN button: the macro spins the camera while you hold it and stops when you let go. VOLUME UP also stops it. It stops by itself after 30 seconds."
+                  "4. Tap EDIT. Drag the blue SWIPE bar where the camera should turn, the JOY square onto your joystick and the JUMP square onto your jump button. Use W+ and W- to change the length of the swipe, and + and - to change the START button size. Tap EDIT again to save.\n\n" +
+                  "5. Do not touch the screen. Hold the VOLUME DOWN button: the macro walks forward, holds jump and spins the camera while you hold it, and stops when you let go. VOLUME UP also stops it. It stops by itself after 30 seconds."
 
               private val green = "#AA2E7D32"
               private val red = "#AAC62828"
@@ -324,6 +337,7 @@ jobs:
 
                   helpView = root
                   wm.addView(root, lp((340 * d).toInt(), WindowManager.LayoutParams.WRAP_CONTENT, Gravity.CENTER, 0, 0))
+                  handler.postDelayed({ closeHelp() }, 20000)
               }
 
               private fun closeHelp() {
@@ -341,6 +355,10 @@ jobs:
                       .putFloat("sx", sxF)
                       .putFloat("sy", syF)
                       .putFloat("sl", slF)
+                      .putFloat("jx", jxF)
+                      .putFloat("jy", jyF)
+                      .putFloat("kx", kxF)
+                      .putFloat("ky", kyF)
                       .apply()
               }
 
@@ -351,6 +369,10 @@ jobs:
                   sxF = prefs.getFloat("sx", 0.60f)
                   syF = prefs.getFloat("sy", 0.50f)
                   slF = prefs.getFloat("sl", 0.30f)
+                  jxF = prefs.getFloat("jx", 0.12f)
+                  jyF = prefs.getFloat("jy", 0.72f)
+                  kxF = prefs.getFloat("kx", 0.90f)
+                  kyF = prefs.getFloat("ky", 0.75f)
                   holdLp = lp(size, size, Gravity.TOP or Gravity.END, prefs.getInt("hx", 330), prefs.getInt("hy", 200))
                   editLp = lp(170, 110, Gravity.TOP or Gravity.END, prefs.getInt("ex", 20), prefs.getInt("ey", 200))
 
@@ -408,6 +430,68 @@ jobs:
                   wm.addView(tv, l)
               }
 
+              private fun dragListener(l: WindowManager.LayoutParams, sync: () -> Unit): View.OnTouchListener {
+                  var dx0 = 0f
+                  var dy0 = 0f
+                  var sx = 0
+                  var sy = 0
+                  return View.OnTouchListener { v, e ->
+                      when (e.action) {
+                          MotionEvent.ACTION_DOWN -> {
+                              dx0 = e.rawX
+                              dy0 = e.rawY
+                              sx = l.x
+                              sy = l.y
+                          }
+                          MotionEvent.ACTION_MOVE -> {
+                              l.x = maxOf(0, sx + (e.rawX - dx0).toInt())
+                              l.y = maxOf(0, sy + (e.rawY - dy0).toInt())
+                              wm.updateViewLayout(v, l)
+                              sync()
+                          }
+                          MotionEvent.ACTION_UP -> {
+                              sync()
+                              savePrefs()
+                          }
+                      }
+                      true
+                  }
+              }
+
+              private fun makePoint(label: String, fx: Float, fy: Float, color: String): Pair<TextView, WindowManager.LayoutParams> {
+                  val dm = screen()
+                  val px = (fx * dm.widthPixels).toInt() - pointSize / 2
+                  val py = (fy * dm.heightPixels).toInt() - pointSize / 2
+                  val l = lp(pointSize, pointSize, Gravity.TOP or Gravity.START, maxOf(0, px), maxOf(0, py))
+                  val tv = TextView(this)
+                  tv.text = label
+                  tv.textSize = 14f
+                  tv.gravity = Gravity.CENTER
+                  tv.setTextColor(Color.WHITE)
+                  tv.setBackgroundColor(Color.parseColor(color))
+                  wm.addView(tv, l)
+                  return Pair(tv, l)
+              }
+
+              private fun showPoints() {
+                  val j = makePoint("JOY", jxF, jyF, "#AAEF6C00")
+                  joyView = j.first
+                  joyLp = j.second
+                  j.first.setOnTouchListener(dragListener(j.second) {
+                      val dm = screen()
+                      jxF = (j.second.x + pointSize / 2) / dm.widthPixels.toFloat()
+                      jyF = (j.second.y + pointSize / 2) / dm.heightPixels.toFloat()
+                  })
+                  val k = makePoint("JUMP", kxF, kyF, "#AA6A1B9A")
+                  jumpView = k.first
+                  jumpLp = k.second
+                  k.first.setOnTouchListener(dragListener(k.second) {
+                      val dm = screen()
+                      kxF = (k.second.x + pointSize / 2) / dm.widthPixels.toFloat()
+                      kyF = (k.second.y + pointSize / 2) / dm.heightPixels.toFloat()
+                  })
+              }
+
               private fun syncMarker() {
                   val ml = markerLp ?: return
                   val dm = screen()
@@ -453,6 +537,7 @@ jobs:
                       wPlusLp = addExtra(wpb, 360)
                       wMinusLp = addExtra(wmb, 480)
                       showMarker()
+                      showPoints()
                   } else {
                       savePrefs()
                       setColor(holdBtn, green)
@@ -463,6 +548,12 @@ jobs:
                       removeView(wPlusBtn)
                       removeView(wMinusBtn)
                       removeView(markerView)
+                      removeView(joyView)
+                      removeView(jumpView)
+                      joyView = null
+                      jumpView = null
+                      joyLp = null
+                      jumpLp = null
                       plusBtn = null
                       minusBtn = null
                       wPlusBtn = null
@@ -491,7 +582,7 @@ jobs:
                       b.text = "STOP\nOK " + okCnt + "\nCX " + cxCnt
                   } else if (okCnt + cxCnt > 0) {
                       b.textSize = 11f
-                      b.text = "START\nOK " + okCnt + "\nCX " + cxCnt
+                      b.text = "START\nOK " + okCnt + "\nCX " + cxCnt + "\nM " + mode
                   } else {
                       b.textSize = 18f
                       b.text = "START"
@@ -504,6 +595,10 @@ jobs:
                   gen++
                   okCnt = 0
                   cxCnt = 0
+                  mode = 0
+                  joy = null
+                  jump = null
+                  closeHelp()
                   handler.removeCallbacks(stopRunnable)
                   handler.postDelayed(stopRunnable, maxRunMs)
                   setColor(holdBtn, red)
@@ -513,6 +608,8 @@ jobs:
 
               private fun stopMacro() {
                   running = false
+                  joy = null
+                  jump = null
                   handler.removeCallbacks(stopRunnable)
                   if (!editMode) {
                       setColor(holdBtn, green)
@@ -525,6 +622,40 @@ jobs:
                   val dm = screen()
                   val w = dm.widthPixels.toFloat()
                   val h = dm.heightPixels.toFloat()
+                  val chunkMs = swipeMs * segments
+                  val b = GestureDescription.Builder()
+
+                  if (mode <= 1) {
+                      val jx = w * jxF
+                      val jy = h * jyF
+                      val jy2 = jy - h * joyDrag
+                      val pj = Path()
+                      val prevJoy = joy
+                      val js = if (prevJoy == null) {
+                          pj.moveTo(jx, jy)
+                          pj.lineTo(jx, jy2)
+                          GestureDescription.StrokeDescription(pj, 0, chunkMs, true)
+                      } else {
+                          pj.moveTo(jx, jy2)
+                          prevJoy.continueStroke(pj, 0, chunkMs, true)
+                      }
+                      joy = js
+                      b.addStroke(js)
+                  }
+
+                  if (mode == 0) {
+                      val pp = Path()
+                      pp.moveTo(w * kxF, h * kyF)
+                      val prevJump = jump
+                      val jd = if (prevJump == null) {
+                          GestureDescription.StrokeDescription(pp, 0, chunkMs, true)
+                      } else {
+                          prevJump.continueStroke(pp, 0, chunkMs, true)
+                      }
+                      jump = jd
+                      b.addStroke(jd)
+                  }
+
                   val x0 = w * sxF
                   val x1 = x0 + w * slF
                   val y = h * syF
@@ -533,10 +664,9 @@ jobs:
                   for (i in 1..segments) {
                       p.lineTo(if (i % 2 == 1) x1 else x0, y)
                   }
-                  val g = GestureDescription.Builder()
-                      .addStroke(GestureDescription.StrokeDescription(p, 0, swipeMs * segments))
-                      .build()
-                  val ok = dispatchGesture(g, object : GestureResultCallback() {
+                  b.addStroke(GestureDescription.StrokeDescription(p, 0, chunkMs))
+
+                  val ok = dispatchGesture(b.build(), object : GestureResultCallback() {
                       override fun onCompleted(d: GestureDescription?) {
                           okCnt++
                           if ((okCnt + cxCnt) % 10 == 0) refreshLabel()
@@ -544,7 +674,12 @@ jobs:
                       }
                       override fun onCancelled(d: GestureDescription?) {
                           cxCnt++
-                          if (cxCnt > 200 && okCnt == 0) {
+                          joy = null
+                          jump = null
+                          if (okCnt == 0 && mode < 2) {
+                              mode++
+                              handler.postDelayed({ swipe(id) }, 300)
+                          } else if (cxCnt > 200 && okCnt == 0) {
                               stopMacro()
                           } else {
                               if ((okCnt + cxCnt) % 10 == 0) refreshLabel()
@@ -552,7 +687,16 @@ jobs:
                           }
                       }
                   }, null)
-                  if (!ok) handler.postDelayed({ swipe(id) }, 16)
+                  if (!ok) {
+                      joy = null
+                      jump = null
+                      if (mode < 2) {
+                          mode++
+                          handler.postDelayed({ swipe(id) }, 300)
+                      } else {
+                          stopMacro()
+                      }
+                  }
               }
 
               override fun onKeyEvent(event: KeyEvent): Boolean {
@@ -581,6 +725,8 @@ jobs:
                   removeView(wPlusBtn)
                   removeView(wMinusBtn)
                   removeView(markerView)
+                  removeView(joyView)
+                  removeView(jumpView)
                   removeView(helpView)
                   super.onDestroy()
               }
