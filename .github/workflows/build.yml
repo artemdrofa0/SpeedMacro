@@ -113,9 +113,8 @@ jobs:
               private val swipeMs = 30L      // длительность одного свайпа (туда или сюда), мс
               private val swipeGap = 4L      // пауза между свайпами внутри одной порции, мс
               private val camSwipes = 8      // сколько свайпов камеры в одной порции (чётное число, не больше 8)
-              private val gapMs = 12L        // пауза между порциями, мс
+              private val leadMs = 8L        // насколько раньше конца порции запускается следующая, мс (чтобы не было пауз)
               private val markerH = 120      // высота синей полосы SWIPE, px
-              private val joyDrag = 0.12f    // насколько макрос тянет джойстик вверх (доля высоты экрана)
               private val pointSize = 140    // размер квадратов JOY и JUMP, px
               // ======================================
 
@@ -141,12 +140,14 @@ jobs:
               private var joyLp: WindowManager.LayoutParams? = null
               private var jumpLp: WindowManager.LayoutParams? = null
               private var size = 240
-              private var jxF = 0.12f        // где стоит джойстик (доля ширины)
-              private var jyF = 0.72f        // (доля высоты)
+              private var jxF = 0.12f        // точка, где макрос держит джойстик (доля ширины)
+              private var jyF = 0.60f        // (доля высоты) - верхняя часть джойстика = вперёд
               private var kxF = 0.90f        // где стоит кнопка прыжка (доля ширины)
               private var kyF = 0.75f        // (доля высоты)
               private var mode = 0           // 0 = идти + прыгать + камера, 1 = идти + камера, 2 = только камера
               private var failCnt = 0
+              private var seq = 0
+              private var cancelledSeq = -1
               private var sxF = 0.60f        // где начинается свайп (доля ширины экрана)
               private var syF = 0.50f        // высота свайпа (доля высоты экрана)
               private var slF = 0.30f        // длина свайпа (доля ширины экрана)
@@ -155,7 +156,7 @@ jobs:
               private var gen = 0
               private var okCnt = 0
               private var cxCnt = 0
-              private val maxRunMs = 30000L
+              private val maxRunMs = 60000L
               private val stopRunnable = Runnable { stopMacro() }
 
               private var downX = 0f
@@ -178,8 +179,8 @@ jobs:
                   "1. Find Blocky Puffiest Classic on the Marketplace or in the Avatar Creator catalog.\n\n" +
                   "2. In your inventory open Body, scroll down a little, tap Full Body, find the right arm and equip it. It is not free: it costs 175 Robux.\n\n" +
                   "3. You can make it better (not required): Atomical Blocky Legs, Atomical Blocky Left Arm and Hes Back Torso. Equip the legs and the left arm. If you want, add the torso too, together with the Blocky Puffiest Classic right arm. The head is not needed.\n\n" +
-                  "4. Tap EDIT. Drag the blue SWIPE bar where the camera should turn, the JOY square onto your joystick and the JUMP square onto your jump button. Use W+ and W- to change the length of the swipe, and + and - to change the START button size. Tap EDIT again to save.\n\n" +
-                  "5. Do not touch the screen. Hold the VOLUME DOWN button: the macro walks forward, holds jump and spins the camera while you hold it, and stops when you let go. VOLUME UP also stops it. It stops by itself after 30 seconds."
+                  "4. Tap EDIT. Drag the blue SWIPE bar where the camera should turn, the JOY square onto the TOP part of your joystick (the point where your thumb would hold it forward) and the JUMP square onto your jump button. Use W+ and W- to change the length of the swipe, and + and - to change the START button size. Tap EDIT again to save.\n\n" +
+                  "5. Do not touch the screen. Hold the VOLUME DOWN button: the macro walks forward, holds jump and spins the camera while you hold it, and stops when you let go. VOLUME UP also stops it. It stops by itself after 60 seconds."
 
               private val green = "#AA2E7D32"
               private val red = "#AAC62828"
@@ -355,8 +356,8 @@ jobs:
                       .putFloat("sx", sxF)
                       .putFloat("sy", syF)
                       .putFloat("sl", slF)
-                      .putFloat("jx", jxF)
-                      .putFloat("jy", jyF)
+                      .putFloat("jx2", jxF)
+                      .putFloat("jy2", jyF)
                       .putFloat("kx", kxF)
                       .putFloat("ky", kyF)
                       .apply()
@@ -369,8 +370,8 @@ jobs:
                   sxF = prefs.getFloat("sx", 0.60f)
                   syF = prefs.getFloat("sy", 0.50f)
                   slF = prefs.getFloat("sl", 0.30f)
-                  jxF = prefs.getFloat("jx", 0.12f)
-                  jyF = prefs.getFloat("jy", 0.72f)
+                  jxF = prefs.getFloat("jx2", 0.12f)
+                  jyF = prefs.getFloat("jy2", 0.60f)
                   kxF = prefs.getFloat("kx", 0.90f)
                   kyF = prefs.getFloat("ky", 0.75f)
                   holdLp = lp(size, size, Gravity.TOP or Gravity.END, prefs.getInt("hx", 330), prefs.getInt("hy", 200))
@@ -597,6 +598,8 @@ jobs:
                   cxCnt = 0
                   mode = 0
                   failCnt = 0
+                  seq++
+                  cancelledSeq = -1
                   closeHelp()
                   handler.removeCallbacks(stopRunnable)
                   handler.postDelayed(stopRunnable, maxRunMs)
@@ -607,6 +610,7 @@ jobs:
 
               private fun stopMacro() {
                   running = false
+                  seq++
                   handler.removeCallbacks(stopRunnable)
                   if (!editMode) {
                       setColor(holdBtn, green)
@@ -626,13 +630,14 @@ jobs:
                   if (mode <= 1) {
                       val pj = Path()
                       pj.moveTo(w * jxF, h * jyF)
-                      pj.lineTo(w * jxF, h * jyF - h * joyDrag)
+                      pj.lineTo(w * jxF, h * jyF + 2f)
                       b.addStroke(GestureDescription.StrokeDescription(pj, 0, chunkMs))
                   }
 
                   if (mode == 0) {
                       val pp = Path()
                       pp.moveTo(w * kxF, h * kyF)
+                      pp.lineTo(w * kxF + 2f, h * kyF)
                       b.addStroke(GestureDescription.StrokeDescription(pp, 0, chunkMs))
                   }
 
@@ -651,33 +656,39 @@ jobs:
                       b.addStroke(GestureDescription.StrokeDescription(pc, i * step, swipeMs))
                   }
 
+                  seq++
+                  val my = seq
                   val ok = dispatchGesture(b.build(), object : GestureResultCallback() {
-                      override fun onCompleted(d: GestureDescription?) {
-                          okCnt++
-                          if ((okCnt + cxCnt) % 10 == 0) refreshLabel()
-                          handler.postDelayed({ swipe(id) }, gapMs)
-                      }
                       override fun onCancelled(d: GestureDescription?) {
+                          if (my != seq || !running || id != gen) return
                           cxCnt++
+                          cancelledSeq = my
                           if (okCnt == 0 && mode < 2) {
                               mode++
+                              seq++
                               handler.postDelayed({ swipe(id) }, 300)
-                          } else if (cxCnt > 200 && okCnt == 0) {
+                          } else if (cxCnt > 300 && okCnt == 0) {
                               stopMacro()
-                          } else {
-                              if ((okCnt + cxCnt) % 10 == 0) refreshLabel()
-                              handler.postDelayed({ swipe(id) }, 5)
                           }
                       }
                   }, null)
                   if (!ok) {
                       failCnt++
+                      seq++
                       if (mode < 2) {
                           mode++
                           handler.postDelayed({ swipe(id) }, 300)
                       } else {
                           stopMacro()
                       }
+                  } else {
+                      handler.postDelayed({
+                          if (running && id == gen && my == seq) {
+                              if (cancelledSeq != my) okCnt++
+                              if (okCnt % 5 == 0) refreshLabel()
+                              swipe(id)
+                          }
+                      }, chunkMs - leadMs)
                   }
               }
 
