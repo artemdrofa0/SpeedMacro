@@ -116,8 +116,7 @@ jobs:
               private val leadMs = 8L        // насколько раньше конца порции запускается следующая, мс (чтобы не было пауз)
               private val markerH = 120      // высота синей полосы SWIPE, px
               private val pointSize = 140    // размер квадратов JOY и JUMP, px
-              private val joyStartOff = 0.05f  // откуда макрос начинает тянуть джойстик (доля высоты ниже точки JOY)
-              private val joyWiggle = 270    // длина удержания джойстика в точке JOY (чем больше, тем короче разгон)
+              private val joyDrag = 0.12f    // насколько макрос тянет джойстик вверх от точки JOY (доля высоты экрана)
               // ======================================
 
               private val handler = Handler(Looper.getMainLooper())
@@ -142,8 +141,8 @@ jobs:
               private var joyLp: WindowManager.LayoutParams? = null
               private var jumpLp: WindowManager.LayoutParams? = null
               private var size = 240
-              private var jxF = 0.12f        // точка, где макрос держит джойстик (доля ширины)
-              private var jyF = 0.60f        // (доля высоты) - верхняя часть джойстика = вперёд
+              private var jxF = 0.12f        // центр джойстика (доля ширины)
+              private var jyF = 0.72f        // (доля высоты)
               private var kxF = 0.90f        // где стоит кнопка прыжка (доля ширины)
               private var kyF = 0.75f        // (доля высоты)
               private var mode = 0           // 0 = идти + прыгать + камера, 1 = идти + камера, 2 = только камера
@@ -181,7 +180,7 @@ jobs:
                   "1. Find Blocky Puffiest Classic on the Marketplace or in the Avatar Creator catalog.\n\n" +
                   "2. In your inventory open Body, scroll down a little, tap Full Body, find the right arm and equip it. It is not free: it costs 175 Robux.\n\n" +
                   "3. You can make it better (not required): Atomical Blocky Legs, Atomical Blocky Left Arm and Hes Back Torso. Equip the legs and the left arm. If you want, add the torso too, together with the Blocky Puffiest Classic right arm. The head is not needed.\n\n" +
-                  "4. Tap EDIT. Drag the blue SWIPE bar where the camera should turn, the JOY square onto the TOP part of your joystick (the point where your thumb would hold it forward) and the JUMP square onto your jump button. Use W+ and W- to change the length of the swipe, and + and - to change the START button size. Tap EDIT again to save.\n\n" +
+                  "4. Tap EDIT. Drag the blue SWIPE bar where the camera should turn, the JOY square exactly onto the CENTER of your joystick and the JUMP square onto your jump button. Use W+ and W- to change the length of the swipe, and + and - to change the START button size. Tap EDIT again to save.\n\n" +
                   "5. Do not touch the screen. Hold the VOLUME DOWN button: the macro walks forward, holds jump and spins the camera while you hold it, and stops when you let go. VOLUME UP also stops it. It stops by itself after 60 seconds."
 
               private val green = "#AA2E7D32"
@@ -358,8 +357,8 @@ jobs:
                       .putFloat("sx", sxF)
                       .putFloat("sy", syF)
                       .putFloat("sl", slF)
-                      .putFloat("jx2", jxF)
-                      .putFloat("jy2", jyF)
+                      .putFloat("jx3", jxF)
+                      .putFloat("jy3", jyF)
                       .putFloat("kx", kxF)
                       .putFloat("ky", kyF)
                       .apply()
@@ -372,8 +371,8 @@ jobs:
                   sxF = prefs.getFloat("sx", 0.60f)
                   syF = prefs.getFloat("sy", 0.50f)
                   slF = prefs.getFloat("sl", 0.30f)
-                  jxF = prefs.getFloat("jx2", 0.12f)
-                  jyF = prefs.getFloat("jy2", 0.60f)
+                  jxF = prefs.getFloat("jx3", 0.12f)
+                  jyF = prefs.getFloat("jy3", 0.72f)
                   kxF = prefs.getFloat("kx", 0.90f)
                   kyF = prefs.getFloat("ky", 0.75f)
                   holdLp = lp(size, size, Gravity.TOP or Gravity.END, prefs.getInt("hx", 330), prefs.getInt("hy", 200))
@@ -631,13 +630,8 @@ jobs:
 
                   if (mode <= 1) {
                       val pj = Path()
-                      val jx = w * jxF
-                      val jy = h * jyF
-                      pj.moveTo(jx, jy + h * joyStartOff)
-                      pj.lineTo(jx, jy)
-                      for (i in 1..joyWiggle) {
-                          pj.lineTo(jx, if (i % 2 == 1) jy - 4f else jy)
-                      }
+                      pj.moveTo(w * jxF, h * jyF)
+                      pj.lineTo(w * jxF, h * jyF - h * joyDrag)
                       b.addStroke(GestureDescription.StrokeDescription(pj, 0, chunkMs))
                   }
 
