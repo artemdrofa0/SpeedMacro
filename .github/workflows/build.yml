@@ -571,4 +571,198 @@ jobs:
               }
 
               private fun resize(d: Int) {
-                  size = (size
+                  size = (size + d).coerceIn(120, 600)
+                  holdLp.width = size
+                  holdLp.height = size
+                  holdBtn?.let { wm.updateViewLayout(it, holdLp) }
+              }
+
+              private fun refreshLabel() {
+                  if (editMode) return
+                  val b = holdBtn ?: return
+                  if (running) {
+                      b.textSize = 11f
+                      b.text = "STOP\nOK " + okCnt + "\nCX " + cxCnt
+                  } else if (okCnt + cxCnt + failCnt > 0) {
+                      b.textSize = 11f
+                      b.text = "START\nOK " + okCnt + "\nCX " + cxCnt + "\nF " + failCnt + "\nM " + mode
+                  } else {
+                      b.textSize = 18f
+                      b.text = "START"
+                  }
+              }
+
+              private fun startMacro() {
+                  if (running || editMode) return
+                  running = true
+                  gen++
+                  okCnt = 0
+                  cxCnt = 0
+                  mode = 0
+                  failCnt = 0
+                  seq++
+                  cancelledSeq = -1
+                  closeHelp()
+                  handler.removeCallbacks(stopRunnable)
+                  handler.postDelayed(stopRunnable, maxRunMs)
+                  setColor(holdBtn, red)
+                  refreshLabel()
+                  swipe(gen)
+              }
+
+              private fun stopMacro() {
+                  running = false
+                  seq++
+                  handler.removeCallbacks(stopRunnable)
+                  if (!editMode) {
+                      setColor(holdBtn, green)
+                      refreshLabel()
+                  }
+              }
+
+              private fun swipe(id: Int) {
+                  if (!running || id != gen) return
+                  val dm = screen()
+                  val w = dm.widthPixels.toFloat()
+                  val h = dm.heightPixels.toFloat()
+                  val step = swipeMs + swipeGap
+                  val chunkMs = step * camSwipes
+                  val b = GestureDescription.Builder()
+
+                  if (mode <= 1) {
+                      val pj = Path()
+                      val jx = w * jxF
+                      val jy = h * jyF
+                      pj.moveTo(jx, jy + h * joyStartOff)
+                      pj.lineTo(jx, jy)
+                      for (i in 1..joyWiggle) {
+                          pj.lineTo(jx, if (i % 2 == 1) jy - 4f else jy)
+                      }
+                      b.addStroke(GestureDescription.StrokeDescription(pj, 0, chunkMs))
+                  }
+
+                  if (mode == 0) {
+                      val pp = Path()
+                      pp.moveTo(w * kxF, h * kyF)
+                      pp.lineTo(w * kxF + 2f, h * kyF)
+                      b.addStroke(GestureDescription.StrokeDescription(pp, 0, chunkMs))
+                  }
+
+                  val x0 = w * sxF
+                  val x1 = x0 + w * slF
+                  val y = h * syF
+                  for (i in 0 until camSwipes) {
+                      val pc = Path()
+                      if (i % 2 == 0) {
+                          pc.moveTo(x0, y)
+                          pc.lineTo(x1, y)
+                      } else {
+                          pc.moveTo(x1, y)
+                          pc.lineTo(x0, y)
+                      }
+                      b.addStroke(GestureDescription.StrokeDescription(pc, i * step, swipeMs))
+                  }
+
+                  seq++
+                  val my = seq
+                  val ok = dispatchGesture(b.build(), object : GestureResultCallback() {
+                      override fun onCancelled(d: GestureDescription?) {
+                          if (my != seq || !running || id != gen) return
+                          cxCnt++
+                          cancelledSeq = my
+                          if (okCnt == 0 && mode < 2) {
+                              mode++
+                              seq++
+                              handler.postDelayed({ swipe(id) }, 300)
+                          } else if (cxCnt > 300 && okCnt == 0) {
+                              stopMacro()
+                          }
+                      }
+                  }, null)
+                  if (!ok) {
+                      failCnt++
+                      seq++
+                      if (mode < 2) {
+                          mode++
+                          handler.postDelayed({ swipe(id) }, 300)
+                      } else {
+                          stopMacro()
+                      }
+                  } else {
+                      handler.postDelayed({
+                          if (running && id == gen && my == seq) {
+                              if (cancelledSeq != my) okCnt++
+                              if (okCnt % 5 == 0) refreshLabel()
+                              swipe(id)
+                          }
+                      }, chunkMs - leadMs)
+                  }
+              }
+
+              override fun onKeyEvent(event: KeyEvent): Boolean {
+                  if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP && running) {
+                      if (event.action == KeyEvent.ACTION_DOWN) stopMacro()
+                      return true
+                  }
+                  if (event.keyCode != KeyEvent.KEYCODE_VOLUME_DOWN) return false
+                  if (event.action == KeyEvent.ACTION_DOWN) {
+                      if (event.repeatCount == 0) startMacro()
+                  } else if (event.action == KeyEvent.ACTION_UP) {
+                      stopMacro()
+                  }
+                  return true
+              }
+
+              override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+              override fun onInterrupt() { stopMacro() }
+
+              override fun onDestroy() {
+                  running = false
+                  removeView(holdBtn)
+                  removeView(editBtn)
+                  removeView(plusBtn)
+                  removeView(minusBtn)
+                  removeView(wPlusBtn)
+                  removeView(wMinusBtn)
+                  removeView(markerView)
+                  removeView(joyView)
+                  removeView(jumpView)
+                  removeView(helpView)
+                  super.onDestroy()
+              }
+          }
+          EOF
+      - name: Build APK
+        run: |
+          if [ -n "$JAVA_HOME_17_X64" ]; then
+            export JAVA_HOME="$JAVA_HOME_17_X64"
+            export PATH="$JAVA_HOME/bin:$PATH"
+          fi
+          java -version
+          ok=0
+          for url in \
+            https://mirrors.cloud.tencent.com/gradle/gradle-8.7-bin.zip \
+            https://repo.huaweicloud.com/gradle/gradle-8.7-bin.zip \
+            https://services.gradle.org/distributions/gradle-8.7-bin.zip \
+            https://downloads.gradle.org/distributions/gradle-8.7-bin.zip
+          do
+            echo "Trying $url"
+            rm -f gradle.zip
+            if curl -fsSL --retry 2 --retry-delay 3 --retry-all-errors -o gradle.zip "$url" && unzip -tq gradle.zip > /dev/null 2>&1; then
+              ok=1
+              break
+            fi
+          done
+          if [ "$ok" = "1" ]; then
+            unzip -q gradle.zip -d "$HOME"
+            G="$HOME/gradle-8.7/bin/gradle"
+          else
+            echo "Download failed, using Gradle installed on the runner"
+            gradle --version
+            G=gradle
+          fi
+          "$G" assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpeedMacro-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
